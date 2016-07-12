@@ -1,4 +1,4 @@
-package com.cloud.agent;
+package com.cloud.agent.service;
 
 import javax.naming.ConfigurationException;
 import java.util.UUID;

@@ -1,5 +1,7 @@
-package com.cloud.agent;
+package com.cloud.agent.service;
 
+import com.cloud.agent.IAgentControl;
+import com.cloud.agent.IAgentControlListener;
 import com.cloud.agent.api.AgentControlAnswer;
 import com.cloud.agent.api.AgentControlCommand;
 import com.cloud.agent.api.Answer;
@@ -70,7 +72,7 @@ public class Agent implements HandlerFactory, IAgentControl {
     private final ThreadPoolExecutor _ugentTaskPool;
     List<IAgentControlListener> _controlListeners = new ArrayList<>();
 
-    IAgentShell _shell;
+    AgentShell _shell;
     NioConnection _connection;
     ServerResource _resource;
     Link _link;
@@ -90,7 +92,7 @@ public class Agent implements HandlerFactory, IAgentControl {
     boolean _reconnectAllowed = true;
     ExecutorService _executor;
 
-    public Agent(final IAgentShell shell, final int localAgentId, final ServerResource resource) throws ConfigurationException {
+    public Agent(final AgentShell shell, final int localAgentId, final ServerResource resource) throws ConfigurationException {
         _shell = shell;
         _resource = resource;
         _link = null;
@@ -280,7 +282,6 @@ public class Agent implements HandlerFactory, IAgentControl {
     public void setId(final Long id) {
         s_logger.info("Set agent id " + id);
         _id = id;
-        _shell.setPersistentProperty(getResourceName(), "id", Long.toString(id));
     }
 
     @Override

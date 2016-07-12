@@ -1,8 +1,8 @@
-package com.cloud.agent;
+package com.cloud.agent.service;
 
-import com.cloud.agent.Agent.ExitStatus;
 import com.cloud.agent.dao.StorageComponent;
 import com.cloud.agent.dao.impl.PropertiesStorage;
+import com.cloud.agent.service.Agent.ExitStatus;
 import com.cloud.resource.ServerResource;
 import com.cloud.utils.NumbersUtil;
 import com.cloud.utils.ProcessUtil;
@@ -11,6 +11,7 @@ import com.cloud.utils.backoff.BackoffAlgorithm;
 import com.cloud.utils.backoff.impl.ConstantTimeBackoff;
 import com.cloud.utils.exception.CloudRuntimeException;
 
+import javax.annotation.PreDestroy;
 import javax.naming.ConfigurationException;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -26,14 +27,13 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 
-import org.apache.commons.daemon.Daemon;
-import org.apache.commons.daemon.DaemonContext;
-import org.apache.commons.daemon.DaemonInitException;
 import org.apache.commons.lang.math.NumberUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
-public class AgentShell implements IAgentShell, Daemon {
+@Service
+public class AgentShell {
     private static final Logger s_logger = LoggerFactory.getLogger(AgentShell.class.getName());
 
     private final Properties _properties = new Properties();
@@ -45,28 +45,12 @@ public class AgentShell implements IAgentShell, Daemon {
     private String _zone;
     private String _pod;
     private String _host;
-    private String _privateIp;
     private int _port;
-    private int _proxyPort;
     private int _workers;
     private String _guid;
     private int _nextAgentId = 1;
     private volatile boolean _exit = false;
     private int _pingRetries;
-
-    public AgentShell() {
-    }
-
-    public static void main(final String[] args) {
-        try {
-            s_logger.debug("Initializing AgentShell from main");
-            final AgentShell shell = new AgentShell();
-            shell.init(args);
-            shell.start();
-        } catch (final ConfigurationException e) {
-            System.out.println(e.getMessage());
-        }
-    }
 
     public void init(final String[] args) throws ConfigurationException {
 
@@ -111,8 +95,8 @@ public class AgentShell implements IAgentShell, Daemon {
     void loadProperties() throws ConfigurationException {
         final File file = PropertiesUtil.findConfigFile("agent.properties");
 
-        if (null == file) {
-            throw new ConfigurationException("Unable to find agent.properties.");
+        if (file == null) {
+            throw new ConfigurationException("Unable to find agent.properties");
         }
 
         s_logger.info("agent.properties found at " + file.getAbsolutePath());
@@ -126,7 +110,7 @@ public class AgentShell implements IAgentShell, Daemon {
         }
     }
 
-    protected boolean parseCommand(final String[] args) throws ConfigurationException {
+    boolean parseCommand(final String[] args) throws ConfigurationException {
         String host = null;
         String workers = null;
         String port = null;
@@ -157,8 +141,6 @@ public class AgentShell implements IAgentShell, Daemon {
                 pod = paramValue;
             } else if (paramName.equalsIgnoreCase("guid")) {
                 guid = paramValue;
-            } else if (paramName.equalsIgnoreCase("eth1ip")) {
-                _privateIp = paramValue;
             }
         }
 
@@ -167,8 +149,6 @@ public class AgentShell implements IAgentShell, Daemon {
         }
 
         _port = NumberUtils.toInt(port, 8250);
-
-        _proxyPort = NumberUtils.toInt(getProperty(null, "consoleproxy.httpListenPort"), 443);
 
         if (workers == null) {
             workers = getProperty(null, "workers");
@@ -232,85 +212,58 @@ public class AgentShell implements IAgentShell, Daemon {
         return true;
     }
 
-    @Override
-    public Map<String, Object> getCmdLineProperties() {
+    Map<String, Object> getCmdLineProperties() {
         return _cmdLineProperties;
     }
 
-    @Override
     public Properties getProperties() {
         return _properties;
     }
 
-    @Override
-    public String getPersistentProperty(final String prefix, final String name) {
+    String getPersistentProperty(final String prefix, final String name) {
         if (prefix != null) {
             return _storage.get(prefix + "." + name);
         }
         return _storage.get(name);
     }
 
-    @Override
-    public void setPersistentProperty(final String prefix, final String name, final String value) {
-        // Don't let the agent edit the configuration file.
-    }
-
-    @Override
     public String getHost() {
         return _host;
     }
 
-    @Override
-    public String getPrivateIp() {
-        return _privateIp;
-    }
-
-    @Override
     public int getPort() {
         return _port;
     }
 
-    @Override
-    public int getWorkers() {
+    int getWorkers() {
         return _workers;
     }
 
-    @Override
-    public int getProxyPort() {
-        return _proxyPort;
-    }
-
-    @Override
     public String getGuid() {
         return _guid;
     }
 
-    @Override
     public String getZone() {
         return _zone;
     }
 
-    @Override
     public String getPod() {
         return _pod;
     }
 
-    @Override
-    public BackoffAlgorithm getBackoffAlgorithm() {
+    BackoffAlgorithm getBackoffAlgorithm() {
         return _backoff;
     }
 
-    @Override
-    public int getPingRetries() {
+    int getPingRetries() {
         return _pingRetries;
     }
 
-    @Override
     public String getVersion() {
         return _version;
     }
 
-    public String getProperty(final String prefix, final String name) {
+    private String getProperty(final String prefix, final String name) {
         if (prefix != null) {
             return _properties.getProperty(prefix + "." + name);
         }
@@ -373,22 +326,11 @@ public class AgentShell implements IAgentShell, Daemon {
         agent.start();
     }
 
-    public synchronized int getNextAgentId() {
+    private synchronized int getNextAgentId() {
         return _nextAgentId++;
     }
 
-    @Override
-    public void init(final DaemonContext dc) throws DaemonInitException {
-        s_logger.debug("Initializing AgentShell from JSVC");
-        try {
-            init(dc.getArguments());
-        } catch (final ConfigurationException ex) {
-            throw new DaemonInitException("Initialization failed", ex);
-        }
-    }
-
-    @Override
-    public void start() {
+    public void start() throws ConfigurationException {
         try {
             boolean ipv6disabled = false;
             final String ipv6 = getProperty(null, "ipv6disabled");
@@ -441,7 +383,7 @@ public class AgentShell implements IAgentShell, Daemon {
                     Thread.sleep(1000);
                 }
             } catch (final InterruptedException e) {
-                s_logger.debug("[ignored] AgentShell was interupted.");
+                s_logger.debug("[ignored] AgentShell was interrupted.");
             }
         } catch (final ConfigurationException e) {
             s_logger.error("Unable to start agent: " + e.getMessage());
@@ -454,13 +396,8 @@ public class AgentShell implements IAgentShell, Daemon {
         }
     }
 
-    @Override
+    @PreDestroy
     public void stop() {
         _exit = true;
-    }
-
-    @Override
-    public void destroy() {
-
     }
 }
