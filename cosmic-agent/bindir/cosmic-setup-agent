@@ -15,7 +15,7 @@ from optparse import OptionParser
 def getUserInputs():
     print "Welcome to the CloudStack Agent Setup:"
 
-    cfo = configFileOps("@AGENTSYSCONFDIR@/agent.properties")
+    cfo = configFileOps("/etc/cosmic/agent/agent.properties")
     oldMgt = cfo.getEntry("host")
 
     mgtSvr = raw_input("Please input the Management Server Hostname/IP-Address:[%s]" % oldMgt)
@@ -71,7 +71,7 @@ def getUserInputs():
 
 
 if __name__ == '__main__':
-    initLoging("@AGENTLOGDIR@/setup.log")
+    initLoging("/var/log/cosmic/agent/setup.log")
     glbEnv = globalEnv()
 
     glbEnv.mode = "Agent"
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     parser.add_option("--prvNic", dest="prvNic", help="Private traffic interface")
     parser.add_option("--guestNic", dest="guestNic", help="Guest traffic interface")
 
-    old_config = configFileOps("@AGENTSYSCONFDIR@/agent.properties")
+    old_config = configFileOps("/etc/cosmic/agent/agent.properties")
     bridgeType = old_config.getEntry("network.bridge.type").lower()
     if bridgeType:
         glbEnv.bridgeType = bridgeType
