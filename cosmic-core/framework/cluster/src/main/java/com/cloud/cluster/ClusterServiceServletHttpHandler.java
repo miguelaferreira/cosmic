@@ -27,30 +27,15 @@ public class ClusterServiceServletHttpHandler implements HttpRequestHandler {
 
     @Override
     public void handle(final HttpRequest request, final HttpResponse response, final HttpContext context) throws HttpException, IOException {
+        if (s_logger.isTraceEnabled()) {
+            s_logger.trace("Start Handling cluster HTTP request");
+        }
 
-        try {
-            if (s_logger.isTraceEnabled()) {
-                s_logger.trace("Start Handling cluster HTTP request");
-            }
+        parseRequest(request);
+        handleRequest(request, response);
 
-            parseRequest(request);
-            handleRequest(request, response);
-
-            if (s_logger.isTraceEnabled()) {
-                s_logger.trace("Handle cluster HTTP request done");
-            }
-        } catch (final Throwable e) {
-            if (s_logger.isDebugEnabled()) {
-                s_logger.debug("Exception " + e.toString());
-            }
-
-            try {
-                writeResponse(response, HttpStatus.SC_INTERNAL_SERVER_ERROR, null);
-            } catch (final Throwable e2) {
-                if (s_logger.isDebugEnabled()) {
-                    s_logger.debug("Exception " + e2.toString());
-                }
-            }
+        if (s_logger.isTraceEnabled()) {
+            s_logger.trace("Handle cluster HTTP request done");
         }
     }
 
@@ -86,28 +71,21 @@ public class ClusterServiceServletHttpHandler implements HttpRequestHandler {
 
         int nMethod = RemoteMethodConstants.METHOD_UNKNOWN;
         String responseContent = null;
-        try {
-            if (method != null) {
-                nMethod = Integer.parseInt(method);
-            }
+        if (method != null) {
+            nMethod = Integer.parseInt(method);
+        }
 
-            switch (nMethod) {
-                case RemoteMethodConstants.METHOD_DELIVER_PDU:
-                    responseContent = handleDeliverPduMethodCall(req);
-                    break;
-
-                case RemoteMethodConstants.METHOD_PING:
-                    responseContent = handlePingMethodCall(req);
-                    break;
-
-                case RemoteMethodConstants.METHOD_UNKNOWN:
-                default:
-                    assert (false);
-                    s_logger.error("unrecognized method " + nMethod);
-                    break;
-            }
-        } catch (final Throwable e) {
-            s_logger.error("Unexpected exception when processing cluster service request : ", e);
+        switch (nMethod) {
+            case RemoteMethodConstants.METHOD_DELIVER_PDU:
+                responseContent = handleDeliverPduMethodCall(req);
+                break;
+            case RemoteMethodConstants.METHOD_PING:
+                responseContent = handlePingMethodCall(req);
+                break;
+            case RemoteMethodConstants.METHOD_UNKNOWN:
+            default:
+                s_logger.error("unrecognized method " + nMethod);
+                break;
         }
 
         if (responseContent != null) {

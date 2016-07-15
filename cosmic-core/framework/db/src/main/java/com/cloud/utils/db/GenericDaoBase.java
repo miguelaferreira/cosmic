@@ -750,8 +750,6 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             return result;
         } catch (final SQLException e) {
             throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
-            throw new CloudRuntimeException("Caught: " + pstmt, e);
         }
     }
 
@@ -955,7 +953,7 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             return results;
         } catch (final SQLException e) {
             throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
+        } catch (InstantiationException | IllegalAccessException e) {
             throw new CloudRuntimeException("Caught: " + pstmt, e);
         }
     }
@@ -1336,6 +1334,11 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
         final TransactionLegacy txn = TransactionLegacy.currentTxn();
         final String sql = "SELECT COUNT(*) FROM (" + str.toString() + ") AS tmp";
 
+        return createPreparedStatementForCount(sc, clause, joins, txn, sql);
+    }
+
+    private Integer createPreparedStatementForCount(final SearchCriteria<T> sc, final String clause, final Collection<JoinBuilder<SearchCriteria<?>>> joins, final
+    TransactionLegacy txn, final String sql) {
         PreparedStatement pstmt = null;
         try {
             pstmt = txn.prepareAutoCloseStatement(sql);
@@ -1350,14 +1353,6 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
                 i = addJoinAttributes(i, pstmt, joins);
             }
 
-            /*
-            if (groupByValues != null) {
-                for (Object value : groupByValues) {
-                    pstmt.setObject(i++, value);
-                }
-            }
-             */
-
             final ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 return rs.getInt(1);
@@ -1365,8 +1360,6 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             return 0;
         } catch (final SQLException e) {
             throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
-            throw new CloudRuntimeException("Caught: " + pstmt, e);
         }
     }
 
@@ -1394,38 +1387,7 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
         final TransactionLegacy txn = TransactionLegacy.currentTxn();
         final String sql = str.toString();
 
-        PreparedStatement pstmt = null;
-        try {
-            pstmt = txn.prepareAutoCloseStatement(sql);
-            int i = 1;
-            if (clause != null) {
-                for (final Pair<Attribute, Object> value : sc.getValues()) {
-                    prepareAttribute(i++, pstmt, value.first(), value.second());
-                }
-            }
-
-            if (joins != null) {
-                i = addJoinAttributes(i, pstmt, joins);
-            }
-
-            /*
-            if (groupByValues != null) {
-                for (Object value : groupByValues) {
-                    pstmt.setObject(i++, value);
-                }
-            }
-             */
-
-            final ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                return rs.getInt(1);
-            }
-            return 0;
-        } catch (final SQLException e) {
-            throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
-            throw new CloudRuntimeException("Caught: " + pstmt, e);
-        }
+        return createPreparedStatementForCount(sc, clause, joins, txn, sql);
     }
 
     @DB()
@@ -1664,8 +1626,6 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             return result;
         } catch (final SQLException e) {
             throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
-            throw new CloudRuntimeException("Caught: " + pstmt, e);
         }
     }
 
@@ -1746,8 +1706,6 @@ public abstract class GenericDaoBase<T, ID extends Serializable> extends Compone
             return pstmt.executeUpdate();
         } catch (final SQLException e) {
             throw new CloudRuntimeException("DB Exception on: " + pstmt, e);
-        } catch (final Throwable e) {
-            throw new CloudRuntimeException("Caught: " + pstmt, e);
         }
     }
 

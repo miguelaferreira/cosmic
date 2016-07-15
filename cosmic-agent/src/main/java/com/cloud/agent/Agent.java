@@ -33,8 +33,6 @@ import org.apache.cloudstack.managed.context.ManagedContextTimerTask;
 
 import javax.naming.ConfigurationException;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.channels.ClosedChannelException;
@@ -371,76 +369,69 @@ public class Agent implements HandlerFactory, IAgentControl {
             for (int i = 0; i < cmds.length; i++) {
                 final Command cmd = cmds[i];
                 Answer answer;
-                try {
-                    if (cmd.getContextParam("logid") != null) {
-                        MDC.put("logcontextid", cmd.getContextParam("logid"));
-                    }
-                    if (s_logger.isDebugEnabled()) {
-                        if (!requestLogged) // ensures request is logged only once per method call
-                        {
-                            final String requestMsg = request.toString();
-                            if (requestMsg != null) {
-                                s_logger.debug("Request:" + requestMsg);
-                            }
-                            requestLogged = true;
+                if (cmd.getContextParam("logid") != null) {
+                    MDC.put("logcontextid", cmd.getContextParam("logid"));
+                }
+                if (s_logger.isDebugEnabled()) {
+                    if (!requestLogged) // ensures request is logged only once per method call
+                    {
+                        final String requestMsg = request.toString();
+                        if (requestMsg != null) {
+                            s_logger.debug("Request:" + requestMsg);
                         }
-                        s_logger.debug("Processing command: " + cmd.toString());
+                        requestLogged = true;
                     }
+                    s_logger.debug("Processing command: " + cmd.toString());
+                }
 
-                    if (cmd instanceof CronCommand) {
-                        final CronCommand watch = (CronCommand) cmd;
-                        scheduleWatch(link, request, (long) watch.getInterval() * 1000, watch.getInterval() * 1000);
-                        answer = new Answer(cmd, true, null);
-                    } else if (cmd instanceof ShutdownCommand) {
-                        final ShutdownCommand shutdown = (ShutdownCommand) cmd;
-                        s_logger.debug("Received shutdownCommand, due to: " + shutdown.getReason());
-                        cancelTasks();
-                        _reconnectAllowed = false;
-                        answer = new Answer(cmd, true, null);
-                    } else if (cmd instanceof ReadyCommand && ((ReadyCommand) cmd).getDetails() != null) {
-                        s_logger.debug("Not ready to connect to mgt server: " + ((ReadyCommand) cmd).getDetails());
-                        System.exit(1);
-                        return;
-                    } else if (cmd instanceof MaintainCommand) {
-                        s_logger.debug("Received maintainCommand");
-                        cancelTasks();
-                        _reconnectAllowed = false;
-                        answer = new MaintainAnswer((MaintainCommand) cmd);
-                    } else if (cmd instanceof AgentControlCommand) {
-                        answer = null;
-                        synchronized (_controlListeners) {
-                            for (final IAgentControlListener listener : _controlListeners) {
-                                answer = listener.processControlRequest(request, (AgentControlCommand) cmd);
-                                if (answer != null) {
-                                    break;
-                                }
+                if (cmd instanceof CronCommand) {
+                    final CronCommand watch = (CronCommand) cmd;
+                    scheduleWatch(link, request, (long) watch.getInterval() * 1000, watch.getInterval() * 1000);
+                    answer = new Answer(cmd, true, null);
+                } else if (cmd instanceof ShutdownCommand) {
+                    final ShutdownCommand shutdown = (ShutdownCommand) cmd;
+                    s_logger.debug("Received shutdownCommand, due to: " + shutdown.getReason());
+                    cancelTasks();
+                    _reconnectAllowed = false;
+                    answer = new Answer(cmd, true, null);
+                } else if (cmd instanceof ReadyCommand && ((ReadyCommand) cmd).getDetails() != null) {
+                    s_logger.debug("Not ready to connect to mgt server: " + ((ReadyCommand) cmd).getDetails());
+                    System.exit(1);
+                    return;
+                } else if (cmd instanceof MaintainCommand) {
+                    s_logger.debug("Received maintainCommand");
+                    cancelTasks();
+                    _reconnectAllowed = false;
+                    answer = new MaintainAnswer((MaintainCommand) cmd);
+                } else if (cmd instanceof AgentControlCommand) {
+                    answer = null;
+                    synchronized (_controlListeners) {
+                        for (final IAgentControlListener listener : _controlListeners) {
+                            answer = listener.processControlRequest(request, (AgentControlCommand) cmd);
+                            if (answer != null) {
+                                break;
                             }
                         }
-
-                        if (answer == null) {
-                            s_logger.warn("No handler found to process cmd: " + cmd.toString());
-                            answer = new AgentControlAnswer(cmd);
-                        }
-                    } else {
-                        if (cmd instanceof ReadyCommand) {
-                            processReadyCommand(cmd);
-                        }
-                        _inProgress.incrementAndGet();
-                        try {
-                            answer = _resource.executeRequest(cmd);
-                        } finally {
-                            _inProgress.decrementAndGet();
-                        }
-                        if (answer == null) {
-                            s_logger.debug("Response: unsupported command" + cmd.toString());
-                            answer = Answer.createUnsupportedCommandAnswer(cmd);
-                        }
                     }
-                } catch (final Throwable th) {
-                    s_logger.warn("Caught: ", th);
-                    final StringWriter writer = new StringWriter();
-                    th.printStackTrace(new PrintWriter(writer));
-                    answer = new Answer(cmd, false, writer.toString());
+
+                    if (answer == null) {
+                        s_logger.warn("No handler found to process cmd: " + cmd.toString());
+                        answer = new AgentControlAnswer(cmd);
+                    }
+                } else {
+                    if (cmd instanceof ReadyCommand) {
+                        processReadyCommand(cmd);
+                    }
+                    _inProgress.incrementAndGet();
+                    try {
+                        answer = _resource.executeRequest(cmd);
+                    } finally {
+                        _inProgress.decrementAndGet();
+                    }
+                    if (answer == null) {
+                        s_logger.debug("Response: unsupported command" + cmd.toString());
+                        answer = Answer.createUnsupportedCommandAnswer(cmd);
+                    }
                 }
 
                 answers[i] = answer;

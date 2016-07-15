@@ -108,8 +108,6 @@ public class ClusterServiceServletImpl implements ClusterService {
             s_logger.error("HttpException from : " + _serviceUrl + ", method : " + method.getParameter("method"));
         } catch (final IOException e) {
             s_logger.error("IOException from : " + _serviceUrl + ", method : " + method.getParameter("method"));
-        } catch (final Throwable e) {
-            s_logger.error("Exception from : " + _serviceUrl + ", method : " + method.getParameter("method") + ", exception :", e);
         } finally {
             method.releaseConnection();
         }
