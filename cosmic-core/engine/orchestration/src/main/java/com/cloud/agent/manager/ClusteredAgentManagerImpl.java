@@ -1057,7 +1057,7 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
         }
 
         synchronized (_agents) {
-            final ClusteredDirectAgentAttache attache = (ClusteredDirectAgentAttache) _agents.get(hostId);
+            final AgentAttache attache = _agents.get(hostId);
             if (attache != null && attache.getQueueSize() == 0 && attache.getNonRecurringListenersSize() == 0) {
                 handleDisconnectWithoutInvestigation(attache, Event.StartAgentRebalance, true, true);
                 final ClusteredAgentAttache forwardAttache = (ClusteredAgentAttache) createAttache(hostId);
