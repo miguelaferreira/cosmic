@@ -931,67 +931,85 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
     }
 
     protected boolean rebalanceHost(final long hostId, final long currentOwnerId, final long futureOwnerId) throws AgentUnavailableException {
-
         boolean result = true;
         if (currentOwnerId == _nodeId) {
-            if (!startRebalance(hostId)) {
-                s_logger.debug("Failed to start agent rebalancing");
-                finishRebalance(hostId, futureOwnerId, Event.RebalanceFailed);
-                return false;
-            }
-            try {
-                final Answer[] answer = sendRebalanceCommand(futureOwnerId, hostId, currentOwnerId, futureOwnerId, Event.StartAgentRebalance);
-                if (answer == null || !answer[0].getResult()) {
-                    result = false;
-                }
-            } catch (final Exception ex) {
-                s_logger.warn("Host " + hostId + " failed to connect to the management server " + futureOwnerId + " as a part of rebalance process", ex);
-                result = false;
-            }
-
-            if (result) {
-                s_logger.debug("Successfully transfered host id=" + hostId + " to management server " + futureOwnerId);
-                finishRebalance(hostId, futureOwnerId, Event.RebalanceCompleted);
-            } else {
-                s_logger.warn("Failed to transfer host id=" + hostId + " to management server " + futureOwnerId);
-                finishRebalance(hostId, futureOwnerId, Event.RebalanceFailed);
-            }
+            result = rebalanceWhenCurrentOwnerIsThisManagementServer(hostId, currentOwnerId, futureOwnerId, result);
         } else if (futureOwnerId == _nodeId) {
-            final HostVO host = _hostDao.findById(hostId);
-            try {
-                if (s_logger.isDebugEnabled()) {
-                    s_logger.debug("Disconnecting host " + host.getId() + "(" + host.getName() + " as a part of rebalance process without notification");
-                }
-
-                final AgentAttache attache = findAttache(hostId);
-                if (attache != null) {
-                    result = handleDisconnect(attache, Event.AgentDisconnected, false, false, true);
-                }
-
-                if (result) {
-                    if (s_logger.isDebugEnabled()) {
-                        s_logger.debug("Loading directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
-                                " as a part of rebalance process");
-                    }
-                    result = loadDirectlyConnectedHost(host, true);
-                } else {
-                    s_logger.warn("Failed to disconnect " + host.getId() + "(" + host.getName() + " as a part of rebalance process without notification");
-                }
-            } catch (final Exception ex) {
-                s_logger.warn("Failed to load directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
-                        " as a part of rebalance process due to:", ex);
-                result = false;
-            }
-
-            if (result) {
-                s_logger.debug("Successfully loaded directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
-                        " as a part of rebalance process");
-            } else {
-                s_logger.warn("Failed to load directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
-                        " as a part of rebalance process");
-            }
+            result = rebalanceWhenFutureOwnerIsThisManagementServer(hostId, result);
         }
 
+        return result;
+    }
+
+    private boolean rebalanceWhenFutureOwnerIsThisManagementServer(final long hostId, boolean result) {
+        final HostVO host = _hostDao.findById(hostId);
+        try {
+            if (s_logger.isDebugEnabled()) {
+                s_logger.debug("Disconnecting host " + host.getId() + "(" + host.getName() + " as a part of rebalance process without notification");
+            }
+
+            final AgentAttache attache = findAttache(hostId);
+            if (attache != null) {
+                result = handleDisconnect(attache, Event.AgentDisconnected, false, false, true);
+            }
+
+            if (result) {
+                if (s_logger.isDebugEnabled()) {
+                    s_logger.debug("Loading directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
+                            " as a part of rebalance process");
+                }
+                result = loadDirectlyConnectedHost(host, true);
+            } else {
+                s_logger.warn("Failed to disconnect " + host.getId() + "(" + host.getName() + " as a part of rebalance process without notification");
+            }
+        } catch (final Exception ex) {
+            s_logger.warn("Failed to load directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
+                    " as a part of rebalance process due to:", ex);
+            result = false;
+        }
+
+        if (result) {
+            s_logger.debug("Successfully loaded directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
+                    " as a part of rebalance process");
+        } else {
+            s_logger.warn("Failed to load directly connected host " + host.getId() + "(" + host.getName() + ") to the management server " + _nodeId +
+                    " as a part of rebalance process");
+        }
+        return result;
+    }
+
+    private boolean rebalanceWhenCurrentOwnerIsThisManagementServer(final long hostId, final long currentOwnerId, final long futureOwnerId, boolean result) {
+        if (!startRebalance(hostId)) {
+            s_logger.debug("Failed to start agent rebalancing");
+            finishRebalance(hostId, futureOwnerId, Event.RebalanceFailed);
+            result = false;
+        } else {
+            result = sendReBalanceCommand(hostId, currentOwnerId, futureOwnerId, result);
+            finishRebalance(hostId, futureOwnerId, result);
+        }
+        return result;
+    }
+
+    private void finishRebalance(final long hostId, final long futureOwnerId, final boolean result) {
+        if (result) {
+            s_logger.debug("Successfully transfered host id=" + hostId + " to management server " + futureOwnerId);
+            finishRebalance(hostId, futureOwnerId, Event.RebalanceCompleted);
+        } else {
+            s_logger.warn("Failed to transfer host id=" + hostId + " to management server " + futureOwnerId);
+            finishRebalance(hostId, futureOwnerId, Event.RebalanceFailed);
+        }
+    }
+
+    private boolean sendReBalanceCommand(final long hostId, final long currentOwnerId, final long futureOwnerId, boolean result) {
+        try {
+            final Answer[] answer = sendRebalanceCommand(futureOwnerId, hostId, currentOwnerId, futureOwnerId, Event.StartAgentRebalance);
+            if (answer == null || !answer[0].getResult()) {
+                result = false;
+            }
+        } catch (final Exception ex) {
+            s_logger.warn("Host " + hostId + " failed to connect to the management server " + futureOwnerId + " as a part of rebalance process", ex);
+            result = false;
+        }
         return result;
     }
 
@@ -1058,8 +1076,9 @@ public class ClusteredAgentManagerImpl extends AgentManagerImpl implements Clust
 
         synchronized (_agents) {
             final AgentAttache attache = _agents.get(hostId);
-            if (attache != null && attache.getQueueSize() == 0 && attache.getNonRecurringListenersSize() == 0) {
-                handleDisconnectWithoutInvestigation(attache, Event.StartAgentRebalance, true, true);
+            if (attache != null && attache instanceof ClusteredDirectAgentAttache && attache.getQueueSize() == 0 && attache.getNonRecurringListenersSize() == 0) {
+                final ClusteredDirectAgentAttache clusteredDirectAgentAttache = (ClusteredDirectAgentAttache) attache;
+                handleDisconnectWithoutInvestigation(clusteredDirectAgentAttache, Event.StartAgentRebalance, true, true);
                 final ClusteredAgentAttache forwardAttache = (ClusteredAgentAttache) createAttache(hostId);
                 if (forwardAttache == null) {
                     s_logger.warn("Unable to create a forward attache for the host " + hostId + " as a part of rebalance process");
