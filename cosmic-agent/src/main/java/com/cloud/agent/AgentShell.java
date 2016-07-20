@@ -61,7 +61,7 @@ public class AgentShell implements IAgentShell, Daemon {
             shell.init(args);
             shell.start();
         } catch (final ConfigurationException e) {
-            System.out.println(e.getMessage());
+            e.printStackTrace();
         }
     }
 
