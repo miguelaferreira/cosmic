@@ -363,9 +363,6 @@ public class AgentShell implements IAgentShell, Daemon {
         agent.start();
     }
 
-    public synchronized int getNextAgentId() {
-        return _nextAgentId++;
-    }
 
     @Override
     public void init(final DaemonContext dc) throws DaemonInitException {
