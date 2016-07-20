@@ -261,11 +261,6 @@ public class AgentShell implements IAgentShell, Daemon {
     }
 
     @Override
-    public String getPrivateIp() {
-        return _privateIp;
-    }
-
-    @Override
     public int getPort() {
         return _port;
     }
@@ -273,11 +268,6 @@ public class AgentShell implements IAgentShell, Daemon {
     @Override
     public int getWorkers() {
         return _workers;
-    }
-
-    @Override
-    public int getProxyPort() {
-        return _proxyPort;
     }
 
     @Override

@@ -16,13 +16,9 @@ public interface IAgentShell {
 
     String getHost();
 
-    String getPrivateIp();
-
     int getPort();
 
     int getWorkers();
-
-    int getProxyPort();
 
     String getGuid();
 
