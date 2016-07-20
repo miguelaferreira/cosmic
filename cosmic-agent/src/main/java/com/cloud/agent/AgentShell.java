@@ -66,19 +66,13 @@ public class AgentShell implements IAgentShell, Daemon {
     }
 
     public void init(final String[] args) throws ConfigurationException {
-
         // PropertiesUtil is used both in management server and agent packages,
         // it searches path under class path and common J2EE containers
         // For KVM agent, do it specially here
 
         s_logger.info("Agent started");
 
-        final Class<?> c = this.getClass();
-        _version = c.getPackage().getImplementationVersion();
-        if (_version == null) {
-            throw new CloudRuntimeException("Unable to find the implementation version of this agent");
-        }
-        s_logger.info("Implementation Version is " + _version);
+        readImplementationVersion();
 
         loadProperties();
         parseCommand(args);
@@ -103,6 +97,15 @@ public class AgentShell implements IAgentShell, Daemon {
         s_logger.info("Defaulting to the constant time backoff algorithm");
         _backoff = new ConstantTimeBackoff();
         _backoff.configure("ConstantTimeBackoff", new HashMap<>());
+    }
+
+    private void readImplementationVersion() {
+        final Class<?> c = this.getClass();
+        _version = c.getPackage().getImplementationVersion();
+        if (_version == null) {
+            throw new CloudRuntimeException("Unable to find the implementation version of this agent");
+        }
+        s_logger.info("Implementation Version is " + _version);
     }
 
     void loadProperties() throws ConfigurationException {
