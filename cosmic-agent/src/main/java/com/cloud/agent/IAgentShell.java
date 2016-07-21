@@ -12,8 +12,4 @@ public interface IAgentShell {
     String getZone();
 
     String getPod();
-
-    int getPingRetries();
-
-    String getVersion();
 }

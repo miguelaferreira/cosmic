@@ -21,34 +21,33 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class AgentShell implements IAgentShell, Daemon {
-    private static final Logger s_logger = LoggerFactory.getLogger(AgentShell.class.getName());
-    public static final String FILE_NAME_AGENT_PROPERTIES = "agent.properties";
+    private static final Logger logger = LoggerFactory.getLogger(AgentShell.class.getName());
+    private static final String FILE_NAME_AGENT_PROPERTIES = "agent.properties";
 
     private final AgentProperties agentProperties = new AgentProperties();
     private Agent agent;
     private BackoffAlgorithm backOff;
-    private String _version;
 
     public static void main(final String[] args) {
         try {
-            s_logger.debug("Initializing AgentShell from main");
+            logger.info("Starting agent shell");
             final AgentShell shell = new AgentShell();
             shell.init(args);
             shell.start();
         } catch (final ConfigurationException e) {
-            e.printStackTrace();
+            logger.error("Failed to start agent shell.", e);
         }
     }
 
     public void init(final String[] args) throws ConfigurationException {
-        s_logger.info("Starting agent");
+        logger.info("Starting agent");
         loadProperties();
         parseCommand(args);
         configureBackOffAlgorithm();
     }
 
     private void configureBackOffAlgorithm() throws ConfigurationException {
-        s_logger.info("Defaulting to the constant time backOff algorithm");
+        logger.info("Defaulting to the constant time backOff algorithm");
         backOff = new ConstantTimeBackoff();
         backOff.configure("ConstantTimeBackoff", new HashMap<>());
     }
@@ -60,7 +59,7 @@ public class AgentShell implements IAgentShell, Daemon {
             throw new ConfigurationException("Unable to find agent.properties.");
         }
 
-        s_logger.info("Found {} at {}", FILE_NAME_AGENT_PROPERTIES, file.getAbsolutePath());
+        logger.info("Found {} at {}", FILE_NAME_AGENT_PROPERTIES, file.getAbsolutePath());
         agentProperties.load(loadPropertiesFromFile(file));
     }
 
@@ -76,7 +75,7 @@ public class AgentShell implements IAgentShell, Daemon {
     }
 
     private void logPropertiesFound(final Properties properties) {
-        properties.entrySet().forEach(entry -> s_logger.debug("Found property: {} = {}", entry.getKey(), entry.getValue()));
+        properties.entrySet().forEach(entry -> logger.debug("Found property: {} = {}", entry.getKey(), entry.getValue()));
     }
 
     protected boolean parseCommand(final String[] args) throws ConfigurationException {
@@ -121,19 +120,9 @@ public class AgentShell implements IAgentShell, Daemon {
         return agentProperties.getPod();
     }
 
-    @Override
-    public int getPingRetries() {
-        return agentProperties.getPingRetries();
-    }
-
-    @Override
-    public String getVersion() {
-        return _version;
-    }
-
     private void launchAgent() throws ConfigurationException {
         final String resourceClassNames = agentProperties.getResource();
-        s_logger.debug("Launching agent with resource is {}", resourceClassNames);
+        logger.debug("Launching agent with resource is {}", resourceClassNames);
         if (resourceClassNames != null) {
             agent = new Agent(agentProperties, backOff);
             agent.start();
@@ -144,7 +133,7 @@ public class AgentShell implements IAgentShell, Daemon {
 
     @Override
     public void init(final DaemonContext dc) throws DaemonInitException {
-        s_logger.debug("Initializing AgentShell from JSVC");
+        logger.debug("Initializing AgentShell from JSVC");
         try {
             init(dc.getArguments());
         } catch (final ConfigurationException ex) {
@@ -154,17 +143,17 @@ public class AgentShell implements IAgentShell, Daemon {
 
     @Override
     public void start() {
-        s_logger.info("Starting agent");
+        logger.info("Starting agent");
         try {
             configureIpStack();
             checkPidFile();
             launchAgent();
             agent.wait();
         } catch (final ConfigurationException e) {
-            s_logger.error("Unable to start agent due to bad configuration", e);
+            logger.error("Unable to start agent due to bad configuration", e);
             System.exit(ExitStatus.Configuration.value());
         } catch (final InterruptedException e) {
-            s_logger.error("Agent shell thread was interrupted", e);
+            logger.error("Agent shell thread was interrupted", e);
             System.exit(ExitStatus.Error.value());
         }
     }
@@ -179,14 +168,14 @@ public class AgentShell implements IAgentShell, Daemon {
         try {
             stop();
         } catch (final Exception e) {
-            s_logger.error("Caught exception while destroying agent shell", e);
+            logger.error("Caught exception while destroying agent shell", e);
         }
     }
 
     private void checkPidFile() throws ConfigurationException {
         final String pidDir = agentProperties.getPidDir();
         final String pidFileName = getPidFileName();
-        s_logger.debug("Checking if {}/{} exists.", pidDir, pidFileName);
+        logger.debug("Checking if {}/{} exists.", pidDir, pidFileName);
         ProcessUtil.pidCheck(pidDir, pidFileName);
     }
 
@@ -204,17 +193,17 @@ public class AgentShell implements IAgentShell, Daemon {
         final boolean ipv6disabled = agentProperties.isIpv6Disabled();
         final boolean ipv6prefer = agentProperties.isIpa6Preferred();
         if (ipv6disabled) {
-            s_logger.info("Preferring IPv4 address family for agent connection");
+            logger.info("Preferring IPv4 address family for agent connection");
             System.setProperty("java.net.preferIPv4Stack", "true");
             if (ipv6prefer) {
-                s_logger.info("ipv6prefer is set to true, but ipv6disabled is false. Not preferring IPv6 for agent connection");
+                logger.info("ipv6prefer is set to true, but ipv6disabled is false. Not preferring IPv6 for agent connection");
             }
         } else {
             if (ipv6prefer) {
-                s_logger.info("Preferring IPv6 address family for agent connection");
+                logger.info("Preferring IPv6 address family for agent connection");
                 System.setProperty("java.net.preferIPv6Addresses", "true");
             } else {
-                s_logger.info("Using default Java settings for IPv6 preference for agent connection");
+                logger.info("Using default Java settings for IPv6 preference for agent connection");
             }
         }
     }

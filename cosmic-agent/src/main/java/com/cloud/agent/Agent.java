@@ -97,11 +97,8 @@ public class Agent implements HandlerFactory, IAgentControl {
         resource = loadServerResource(agentProperties.getResource());
         resource.setAgentControl(this);
 
-        _urgentTaskPool = new ThreadPoolExecutor(agentProperties.getPingRetries(), 2 * agentProperties.getPingRetries(), 10, TimeUnit.MINUTES, new SynchronousQueue<>(),
-                new NamedThreadFactory("UrgentTask"));
-
         if (!resource.configure(getResourceName(), agentProperties.buildPropertiesMap())) {
-            stop("Unable to configure " + resource.getName());
+            throw new ConfigurationException("Unable to configure " + resource.getName());
         } else {
             logger.info("Agent resource {} configured", resource.getName());
         }
@@ -110,6 +107,9 @@ public class Agent implements HandlerFactory, IAgentControl {
 
         logger.debug("Adding shutdown hook");
         Runtime.getRuntime().addShutdownHook(new ShutdownThread(this));
+
+        _urgentTaskPool = new ThreadPoolExecutor(agentProperties.getPingRetries(), 2 * agentProperties.getPingRetries(), 10, TimeUnit.MINUTES, new SynchronousQueue<>(),
+                new NamedThreadFactory("UrgentTask"));
 
         _executor =
                 new ThreadPoolExecutor(agentProperties.getWorkers(), 5 * agentProperties.getWorkers(), 1, TimeUnit.DAYS, new LinkedBlockingQueue<>(),
