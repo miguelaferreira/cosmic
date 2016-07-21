@@ -16,7 +16,7 @@ import com.cloud.agent.transport.Request;
 import com.cloud.agent.transport.Response;
 import com.cloud.exception.AgentControlChannelException;
 import com.cloud.resource.ServerResource;
-import com.cloud.utils.PropertiesUtil;
+import com.cloud.utils.backoff.BackoffAlgorithm;
 import com.cloud.utils.concurrency.NamedThreadFactory;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.exception.NioConnectionException;
@@ -34,12 +34,13 @@ import javax.naming.ConfigurationException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Timer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -65,13 +66,14 @@ import org.slf4j.MDC;
  **/
 public class Agent implements HandlerFactory, IAgentControl {
     private static final Logger s_logger = LoggerFactory.getLogger(Agent.class.getName());
-    //For time sentitive task, e.g. PingTask
-    private final ThreadPoolExecutor _ugentTaskPool;
-    List<IAgentControlListener> _controlListeners = new ArrayList<>();
+    private final ThreadPoolExecutor _urgentTaskPool;
+    private final List<IAgentControlListener> _controlListeners = new ArrayList<>();
 
-    private final IAgentShell _shell;
+    private final AgentProperties agentProperties;
+    private final BackoffAlgorithm backOffAlgorithm;
+
     private NioConnection _connection;
-    private ServerResource _resource;
+    private final ServerResource resource;
     private Link _link;
     private Long _id;
 
@@ -89,78 +91,88 @@ public class Agent implements HandlerFactory, IAgentControl {
     private boolean _reconnectAllowed = true;
     private final ExecutorService _executor;
 
-    public Agent(final IAgentShell shell, final ServerResource resource) throws ConfigurationException {
-        _shell = shell;
-        _resource = resource;
-
+    public Agent(final AgentProperties agentProperties, final BackoffAlgorithm backOffAlgorithm) throws ConfigurationException {
+        this.agentProperties = agentProperties;
+        this.backOffAlgorithm = backOffAlgorithm;
+        resource = loadServerResource(agentProperties.getResource());
         resource.setAgentControl(this);
 
-        final String value = _shell.getPersistentProperty(getResourceName(), "id");
-        _id = value != null ? Long.parseLong(value) : null;
-        s_logger.info("id is " + (_id != null ? _id : ""));
-
-        final Map<String, Object> params = PropertiesUtil.toMap(_shell.getProperties());
-
-        // merge with properties from command line to let resource access command line parameters
-        for (final Map.Entry<String, Object> cmdLineProp : _shell.getCmdLineProperties().entrySet()) {
-            params.put(cmdLineProp.getKey(), cmdLineProp.getValue());
+        if (!resource.configure(getResourceName(), agentProperties.buildPropertiesMap())) {
+            throw new ConfigurationException("Unable to configure " + resource.getName());
         }
 
-        if (!_resource.configure(getResourceName(), params)) {
-            throw new ConfigurationException("Unable to configure " + _resource.getName());
-        }
-
-        _connection = new NioClient("Agent", _shell.getHost(), _shell.getPort(), _shell.getWorkers(), this);
+        _connection = new NioClient("Agent", agentProperties.getHost(), agentProperties.getPort(), agentProperties.getWorkers(), this);
 
         s_logger.debug("Adding shutdown hook");
         Runtime.getRuntime().addShutdownHook(new ShutdownThread(this));
 
-        _ugentTaskPool =
-                new ThreadPoolExecutor(shell.getPingRetries(), 2 * shell.getPingRetries(), 10, TimeUnit.MINUTES, new SynchronousQueue<>(), new NamedThreadFactory("UrgentTask"));
+        _urgentTaskPool = new ThreadPoolExecutor(agentProperties.getPingRetries(), 2 * agentProperties.getPingRetries(), 10, TimeUnit.MINUTES, new SynchronousQueue<>(),
+                new NamedThreadFactory("UrgentTask"));
 
         _executor =
-                new ThreadPoolExecutor(_shell.getWorkers(), 5 * _shell.getWorkers(), 1, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new NamedThreadFactory("agentRequest-Handler"));
+                new ThreadPoolExecutor(agentProperties.getWorkers(), 5 * agentProperties.getWorkers(), 1, TimeUnit.DAYS, new LinkedBlockingQueue<>(),
+                        new NamedThreadFactory("agentRequest-Handler"));
 
-        s_logger.info("Agent [id = " + (_id != null ? _id : "new") + " : type = " + getResourceName() + " : zone = " + _shell.getZone() + " : pod = " + _shell.getPod() +
-                " : workers = " + _shell.getWorkers() + " : host = " + _shell.getHost() + " : port = " + _shell.getPort());
+        s_logger.info("Agent [id = " + (_id != null ? _id : "new") + " : type = " + getResourceName() + " : zone = " + agentProperties.getZone() + " : pod = "
+                + agentProperties.getPod() + " : workers = " + agentProperties.getWorkers() + " : host = " + agentProperties.getHost() + " : port = " + agentProperties.getPort());
+    }
+
+    private ServerResource loadServerResource(final String resourceClassName) throws ConfigurationException {
+        final String[] names = resourceClassName.split("\\|");
+        for (final String name : names) {
+            final Class<?> impl;
+            try {
+                impl = Class.forName(name);
+                final Constructor<?> constructor = impl.getDeclaredConstructor();
+                constructor.setAccessible(true);
+                return (ServerResource) constructor.newInstance();
+            } catch (final ClassNotFoundException
+                    | SecurityException
+                    | NoSuchMethodException
+                    | IllegalArgumentException
+                    | InstantiationException
+                    | IllegalAccessException
+                    | InvocationTargetException e) {
+                throw new ConfigurationException("Failed to launch agent due to: " + e.getMessage());
+            }
+        }
+        throw new ConfigurationException("Could not find server resource class to load in: " + resourceClassName);
     }
 
     public String getResourceName() {
-        return _resource.getClass().getSimpleName();
+        return resource.getClass().getSimpleName();
     }
 
     public ServerResource getResource() {
-        return _resource;
+        return resource;
     }
 
     public void start() {
-        if (!_resource.start()) {
-            s_logger.error("Unable to start the resource: " + _resource.getName());
-            throw new CloudRuntimeException("Unable to start the resource: " + _resource.getName());
+        if (!resource.start()) {
+            s_logger.error("Unable to start the resource: " + resource.getName());
+            throw new CloudRuntimeException("Unable to start the resource: " + resource.getName());
         }
 
         try {
             _connection.start();
         } catch (final NioConnectionException e) {
-            s_logger.warn("NIO Connection Exception  " + e);
-            s_logger.info("Attempted to connect to the server, but received an unexpected exception, trying again...");
+            s_logger.warn("Attempted to connect to the server, but received an unexpected exception, trying again...", e);
         }
         while (!_connection.isStartup()) {
-            _shell.getBackoffAlgorithm().waitBeforeRetry();
-            _connection = new NioClient("Agent", _shell.getHost(), _shell.getPort(), _shell.getWorkers(), this);
+            backOffAlgorithm.waitBeforeRetry();
+            _connection = new NioClient("Agent", agentProperties.getHost(), agentProperties.getPort(), agentProperties.getWorkers(), this);
             try {
                 _connection.start();
             } catch (final NioConnectionException e) {
-                s_logger.warn("NIO Connection Exception  " + e);
-                s_logger.info("Attempted to connect to the server, but received an unexpected exception, trying again...");
+                s_logger.warn("Attempted to connect to the server, but received an unexpected exception, trying again...", e);
             }
         }
     }
 
-    public void stop(final String reason, final String detail) {
-        s_logger.info("Stopping the agent: Reason = " + reason + (detail != null ? ": Detail = " + detail : ""));
+    public void stop(final String reason) {
+        s_logger.info("Stopping the agent due to: {}", reason);
         if (_connection != null) {
-            final ShutdownCommand cmd = new ShutdownCommand(reason, detail);
+            final ShutdownCommand cmd = new ShutdownCommand(reason);
             try {
                 if (_link != null) {
                     final Request req = new Request(_id != null ? _id : -1, -1, cmd, false);
@@ -181,16 +193,16 @@ public class Agent implements HandlerFactory, IAgentControl {
             _connection = null;
         }
 
-        if (_resource != null) {
-            _resource.stop();
-            _resource = null;
+        if (resource != null) {
+            resource.stop();
         }
 
-        _ugentTaskPool.shutdownNow();
+        _urgentTaskPool.shutdownNow();
+        this.notifyAll();
     }
 
     public void sendStartup(final Link link) {
-        final StartupCommand[] startup = _resource.initialize();
+        final StartupCommand[] startup = resource.initialize();
         if (startup != null) {
             final Command[] commands = new Command[startup.length];
             for (int i = 0; i < startup.length; i++) {
@@ -217,8 +229,8 @@ public class Agent implements HandlerFactory, IAgentControl {
         try {
             addr = InetAddress.getLocalHost();
         } catch (final UnknownHostException e) {
-            s_logger.warn("unknow host? ", e);
-            throw new CloudRuntimeException("Cannot get local IP address");
+            s_logger.warn("Unknown host", e);
+            throw new CloudRuntimeException("Cannot get local IP address", e);
         }
 
         final Script command = new Script("hostname", 500, s_logger);
@@ -230,11 +242,11 @@ public class Agent implements HandlerFactory, IAgentControl {
         if (startup.getName() == null) {
             startup.setName(hostname);
         }
-        startup.setDataCenter(getZone());
-        startup.setPod(getPod());
+        startup.setDataCenter(agentProperties.getZone());
+        startup.setPod(agentProperties.getPod());
         startup.setGuid(getResourceGuid());
         startup.setResourceName(getResourceName());
-        startup.setVersion(getVersion());
+        startup.setVersion(agentProperties.getVersion());
     }
 
     protected synchronized long getNextSequence() {
@@ -250,27 +262,14 @@ public class Agent implements HandlerFactory, IAgentControl {
         return _id;
     }
 
-    public String getZone() {
-        return _shell.getZone();
-    }
-
-    public String getPod() {
-        return _shell.getPod();
-    }
-
     public String getResourceGuid() {
-        final String guid = _shell.getGuid();
+        final String guid = agentProperties.getGuid();
         return guid + "-" + getResourceName();
-    }
-
-    public String getVersion() {
-        return _shell.getVersion();
     }
 
     public void setId(final Long id) {
         s_logger.info("Set agent id " + id);
         _id = id;
-        _shell.setPersistentProperty(getResourceName(), "id", Long.toString(id));
     }
 
     @Override
@@ -295,11 +294,11 @@ public class Agent implements HandlerFactory, IAgentControl {
         setLink(null);
         cancelTasks();
 
-        _resource.disconnected();
+        resource.disconnected();
 
         int inProgress = 0;
         do {
-            _shell.getBackoffAlgorithm().waitBeforeRetry();
+            backOffAlgorithm.waitBeforeRetry();
 
             s_logger.info("Lost connection to the server. Dealing with the remaining commands...");
 
@@ -318,10 +317,10 @@ public class Agent implements HandlerFactory, IAgentControl {
         }
 
         while (_connection.isStartup()) {
-            _shell.getBackoffAlgorithm().waitBeforeRetry();
+            backOffAlgorithm.waitBeforeRetry();
         }
 
-        _connection = new NioClient("Agent", _shell.getHost(), _shell.getPort(), _shell.getWorkers(), this);
+        _connection = new NioClient("Agent", agentProperties.getHost(), agentProperties.getPort(), agentProperties.getWorkers(), this);
         do {
             s_logger.info("Reconnecting...");
             try {
@@ -330,7 +329,7 @@ public class Agent implements HandlerFactory, IAgentControl {
                 s_logger.warn("NIO Connection Exception  " + e);
                 s_logger.info("Attempted to connect to the server, but received an unexpected exception, trying again...");
             }
-            _shell.getBackoffAlgorithm().waitBeforeRetry();
+            backOffAlgorithm.waitBeforeRetry();
         } while (!_connection.isStartup());
         s_logger.info("Connected to the server");
     }
@@ -417,7 +416,7 @@ public class Agent implements HandlerFactory, IAgentControl {
                         }
                         _inProgress.incrementAndGet();
                         try {
-                            answer = _resource.executeRequest(cmd);
+                            answer = resource.executeRequest(cmd);
                         } finally {
                             _inProgress.decrementAndGet();
                         }
@@ -529,7 +528,7 @@ public class Agent implements HandlerFactory, IAgentControl {
         setLastPingResponseTime();
         scheduleWatch(link, response, _pingInterval, _pingInterval);
 
-        _ugentTaskPool.setKeepAliveTime(2 * _pingInterval, TimeUnit.MILLISECONDS);
+        _urgentTaskPool.setKeepAliveTime(2 * _pingInterval, TimeUnit.MILLISECONDS);
 
         s_logger.info("Startup Response Received: agent id = " + getId());
     }
@@ -541,12 +540,12 @@ public class Agent implements HandlerFactory, IAgentControl {
     public void processOtherTask(final Task task) {
         final Object obj = task.get();
         if (obj instanceof Response) {
-            if (System.currentTimeMillis() - _lastPingResponseTime > _pingInterval * _shell.getPingRetries()) {
-                s_logger.error("Ping Interval has gone past " + _pingInterval * _shell.getPingRetries() + ". Won't reconnect to mgt server, as connection is still alive");
+            if (System.currentTimeMillis() - _lastPingResponseTime > _pingInterval * agentProperties.getPingRetries()) {
+                s_logger.error("Ping Interval has gone past " + _pingInterval * agentProperties.getPingRetries() + ". Won't reconnect to mgt server, as connection is still alive");
                 return;
             }
 
-            final PingCommand ping = _resource.getCurrentStatus(getId());
+            final PingCommand ping = resource.getCurrentStatus(getId());
             final Request request = new Request(_id, -1, ping, false);
             request.setSequence(getNextSequence());
             if (s_logger.isDebugEnabled()) {
@@ -569,7 +568,7 @@ public class Agent implements HandlerFactory, IAgentControl {
             Answer answer = null;
             _inProgress.incrementAndGet();
             try {
-                answer = _resource.executeRequest(command);
+                answer = resource.executeRequest(command);
             } finally {
                 _inProgress.decrementAndGet();
             }
@@ -645,7 +644,7 @@ public class Agent implements HandlerFactory, IAgentControl {
 
         @Override
         public void run() {
-            _agent.stop(ShutdownCommand.Requested, null);
+            _agent.stop(ShutdownCommand.Requested);
         }
     }
 
@@ -675,7 +674,7 @@ public class Agent implements HandlerFactory, IAgentControl {
             }
             try {
                 if (_request instanceof Response) {
-                    _ugentTaskPool.submit(new ServerHandler(Task.Type.OTHER, _link, _request));
+                    _urgentTaskPool.submit(new ServerHandler(Task.Type.OTHER, _link, _request));
                 } else {
                     _link.schedule(new ServerHandler(Task.Type.OTHER, _link, _request));
                 }
@@ -753,7 +752,7 @@ public class Agent implements HandlerFactory, IAgentControl {
         @Override
         public void doTask(final Task task) throws TaskExecutionException {
             if (task.getType() == Task.Type.CONNECT) {
-                _shell.getBackoffAlgorithm().reset();
+                backOffAlgorithm.reset();
                 setLink(task.getLink());
                 sendStartup(task.getLink());
             } else if (task.getType() == Task.Type.DATA) {
